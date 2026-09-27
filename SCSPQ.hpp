@@ -4,7 +4,6 @@
 #include <optional>
 #include <utility>
 #include <type_traits>
-#include <new>
 
 template <typename T>
 class SCSPQ
