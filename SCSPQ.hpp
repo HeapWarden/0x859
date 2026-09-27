@@ -9,10 +9,12 @@
 template <typename T>
 class SCSPQ
 {
+    static constexpr std::size_t kCacheLineSize = 64;
+
     const std::size_t capacity_;
     std::unique_ptr<T[]> buffer_;
-    alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> head_{};
-    alignas(std::hardware_destructive_interference_size) std::atomic<std::size_t> tail_{};
+    alignas(kCacheLineSize) std::atomic<std::size_t> head_{};
+    alignas(kCacheLineSize) std::atomic<std::size_t> tail_{};
 
 public:
     explicit SCSPQ(std::size_t capacity) : capacity_(capacity), buffer_(capacity ? std::make_unique<T[]>(capacity) : nullptr) {}
@@ -55,7 +57,8 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool pop(T &result) noexcept(std::is_nothrow_move_assignable_v<T>)
+    [[nodiscard]] bool pop(T &result) noexcept((std::is_move_assignable_v<T> && std::is_nothrow_move_assignable_v<T>) ||
+                                               (std::is_copy_assignable_v<T> && std::is_nothrow_copy_assignable_v<T>))
     {
         if (capacity_ == 0)
             return false;
@@ -66,7 +69,11 @@ public:
         if (head == tail)
             return false;
 
-        result = std::move(buffer_[head % capacity_]);
+        if constexpr (std::is_move_assignable_v<T>)
+            result = std::move(buffer_[head % capacity_]);
+        else
+            result = buffer_[head % capacity_];
+
         head_.store(head + 1, std::memory_order_release);
         return true;
     }
@@ -96,7 +103,7 @@ public:
             return result;
         }
     }
-
+    void clear() noexcept { head_.store(tail_.load(std::memory_order_acquire), std::memory_order_release); }
     std::size_t size() const noexcept { return tail_.load(std::memory_order_acquire) - head_.load(std::memory_order_acquire); }
     std::size_t capacity() const noexcept { return capacity_; }
     bool empty() const noexcept { return size() == 0; }
