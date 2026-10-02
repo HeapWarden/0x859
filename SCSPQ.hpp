@@ -8,8 +8,6 @@
 #include <new>
 
 template <typename T>
-    requires(std::constructible_from<T, T &&> && std::assignable_from<T &, T &&>) ||
-            (std::constructible_from<T, const T &> && std::assignable_from<T &, const T &>)
 class SCSPQ
 {
 #pragma GCC diagnostic push
@@ -25,7 +23,12 @@ class SCSPQ
 
 public:
     explicit SCSPQ(std::size_t capacity) : capacity_(capacity), buffer_(capacity ? allocator_.allocate(capacity) : nullptr) {}
-    ~SCSPQ() { allocator_.deallocate(buffer_, capacity_); }
+    ~SCSPQ()
+    {
+        clear();
+        if (buffer_)
+            allocator_.deallocate(buffer_, capacity_);
+    }
 
     SCSPQ(const SCSPQ &) = delete;
     SCSPQ &operator=(const SCSPQ &) = delete;
@@ -33,6 +36,7 @@ public:
     SCSPQ &operator=(SCSPQ &&) = delete;
 
     [[nodiscard]] bool push(const T &value) noexcept(std::is_nothrow_copy_constructible_v<T>)
+        requires std::constructible_from<T, const T &>
     {
         if (capacity_ == 0)
             return false;
@@ -49,6 +53,7 @@ public:
     }
 
     [[nodiscard]] bool push(T &&value) noexcept(std::is_nothrow_move_constructible_v<T>)
+        requires std::constructible_from<T, T &&>
     {
         if (capacity_ == 0)
             return false;
@@ -66,6 +71,7 @@ public:
 
     [[nodiscard]] bool pop(T &result) noexcept(std::is_nothrow_assignable_v<T &, T &&> ||
                                                (!std::assignable_from<T &, T &&> && std::is_nothrow_assignable_v<T &, const T &>))
+        requires std::assignable_from<T &, T &&> || std::assignable_from<T &, const T &>
     {
         if (capacity_ == 0)
             return false;
@@ -86,8 +92,9 @@ public:
         return true;
     }
 
-    [[nodiscard]] std::optional<T> pop() noexcept(std::is_nothrow_assignable_v<T &, T &&> ||
-                                                  (!std::assignable_from<T &, T &&> && std::is_nothrow_assignable_v<T &, const T &>))
+    std::optional<T> pop() noexcept(std::is_nothrow_constructible_v<T, T &&> ||
+                                    (!std::constructible_from<T, T &&> && std::is_nothrow_constructible_v<T, const T &>))
+        requires std::constructible_from<T, T &&> || std::constructible_from<T, const T &>
     {
         if (capacity_ == 0)
             return std::nullopt;
@@ -108,7 +115,21 @@ public:
         head_.store(head + 1, std::memory_order_release);
         return result;
     }
-    void clear() noexcept { head_.store(tail_.load(std::memory_order_acquire), std::memory_order_release); }
+
+    void clear() noexcept
+    {
+        if (capacity_ == 0)
+            return;
+
+        const std::size_t head = head_.load(std::memory_order_relaxed);
+        const std::size_t tail = tail_.load(std::memory_order_acquire);
+
+        for (std::size_t i = head; i != tail; ++i)
+            std::destroy_at(buffer_ + i % capacity_);
+
+        head_.store(tail, std::memory_order_release);
+    }
+
     std::size_t size() const noexcept { return tail_.load(std::memory_order_acquire) - head_.load(std::memory_order_acquire); }
     std::size_t capacity() const noexcept { return capacity_; }
     bool empty() const noexcept { return size() == 0; }

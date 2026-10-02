@@ -6,7 +6,8 @@
  - No blocking operations (e.g. pop_wait()) — handle synchronization yourself.  
 
 ### Known limitations:  
- - Works with one producer and one consumer.  
+ - Works with one producer and one consumer. 
+ - clear() may only be called by the consumer thread   
  - When head/tail counters overflow, it’s GG.  
 
 ### How to build:  
